@@ -1,0 +1,38 @@
+# Unreal Engine
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.sln
+*.suo
+*.xcworkspace/
+*.xcodeproj/
+
+# Unreal Engine generated files
+*.uproject.bak
+/Config/DefaultEditorPerProjectUserSettings.ini
+
+# Compiled source
+*.o
+*.obj
+*.dll
+*.dylib
+*.exe
+*.pdb
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
