@@ -40,8 +40,7 @@ app.get('/api/file/:key', (req, res) => {
 });
 
 app.put('/api/file/:key', (req, res) => {
-  const { password, content } = req.body;
-  if (password !== EDIT_PASSWORD) return res.status(401).json({ error: 'Incorrect password' });
+  const { content } = req.body;
   const meta = FILES[req.params.key.toUpperCase()];
   if (!meta) return res.status(404).json({ error: 'Not found' });
   if (typeof content !== 'string') return res.status(400).json({ error: 'Invalid content' });

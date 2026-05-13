@@ -24,6 +24,7 @@ marked.use({ gfm: true, breaks: false });
 async function init() {
   await buildNav();
   await loadProgressFromSystems();
+  openFile('DESIGN');
 }
 
 
@@ -146,8 +147,7 @@ function parseMarkdown(src) {
 
 /* ════════════════════════════════════════
    INTERACTIVE CHECKBOXES
-   Clicking a checkbox in any doc instantly
-   saves the toggled state (with password).
+   Clicking a checkbox instantly saves.
 ════════════════════════════════════════ */
 
 function attachCheckboxHandlers(container, key) {
@@ -231,19 +231,13 @@ function enterEditMode(key, markdown) {
   const actions = document.getElementById('topbarActions');
   actions.innerHTML = '';
 
-  const pwd = make('input', {
-    type: 'password', class: 'pwd-inline', id: 'editPwd', placeholder: 'Password'
-  });
-  const saved = sessionStorage.getItem('editPwd');
-  if (saved) pwd.value = saved;
-
   const saveBtn   = make('button', { class: 'btn btn-success' }, '✓ &nbsp;Save');
   const cancelBtn = make('button', { class: 'btn btn-ghost'   }, '✕ &nbsp;Cancel');
 
   saveBtn.addEventListener(  'click', () => commitEdit(key));
   cancelBtn.addEventListener('click', () => exitEditMode());
 
-  actions.append(pwd, saveBtn, cancelBtn);
+  actions.append(saveBtn, cancelBtn);
   ta.focus();
 }
 
@@ -253,23 +247,12 @@ function refreshPreview(markdown) {
 }
 
 async function commitEdit(key) {
-  const pwdEl = document.getElementById('editPwd');
-  const pwd   = pwdEl?.value.trim() || '';
-
-  if (!pwd) {
-    pwdEl?.classList.add('shake');
-    setTimeout(() => pwdEl?.classList.remove('shake'), 400);
-    showToast('Password required', 'err');
-    return;
-  }
-
   const saveBtn = document.querySelector('#topbarActions .btn-success');
   if (saveBtn) { saveBtn.textContent = '…'; saveBtn.disabled = true; }
 
-  const ok = await saveContent(key, state.editContent, pwd);
+  const ok = await saveContent(key, state.editContent);
 
   if (ok) {
-    sessionStorage.setItem('editPwd', pwd);
     showToast('Saved', 'ok');
     exitEditMode();
     openFile(key);
@@ -288,37 +271,16 @@ function exitEditMode() {
    SAVE (shared by edit mode + checkboxes)
 ════════════════════════════════════════ */
 
-async function saveContent(key, content, password) {
-  // If no password provided, try session storage; if still none, prompt via modal
-  if (!password) {
-    const stored = sessionStorage.getItem('editPwd');
-    if (stored) {
-      password = stored;
-    } else {
-      password = await promptPassword('Save Changes', 'Enter the edit password to continue.');
-      if (!password) return false;
-    }
-  }
-
+async function saveContent(key, content) {
   try {
     const res  = await fetch(`/api/file/${key}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, content }),
+      body: JSON.stringify({ content }),
     });
     const data = await res.json();
-
-    if (res.ok) {
-      sessionStorage.setItem('editPwd', password);
-      return true;
-    }
-
-    if (res.status === 401) {
-      sessionStorage.removeItem('editPwd');
-      showToast('Incorrect password', 'err');
-    } else {
-      showToast(data.error || 'Save failed', 'err');
-    }
+    if (res.ok) return true;
+    showToast(data.error || 'Save failed', 'err');
     return false;
   } catch {
     showToast('Network error — could not save', 'err');
