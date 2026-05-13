@@ -1,17 +1,26 @@
 /* ════════════════════════════════════════
-   GITHUB CONFIG
-   Change GITHUB_BRANCH to whatever branch
-   GitHub Pages is serving from.
+   GITHUB CONFIG  (used for saves only)
 ════════════════════════════════════════ */
 
 const GITHUB_REPO   = 'nicholasbrownworship/JediTPS';
 const GITHUB_BRANCH = 'main';
 
+// Paths within the repo — used by the GitHub API when saving
 const FILE_PATHS = {
   README:   'README.md',
   DESIGN:   'docs/DESIGN.md',
   SYSTEMS:  'docs/SYSTEMS.md',
   SESSIONS: 'docs/SESSIONS.md',
+};
+
+// Relative URLs for reads — these files sit next to index.html
+// (README.md is copied into docs/ by the Actions workflow,
+//  and served from root by the local Express server)
+const RELATIVE_PATHS = {
+  README:   'README.md',
+  DESIGN:   'DESIGN.md',
+  SYSTEMS:  'SYSTEMS.md',
+  SESSIONS: 'SESSIONS.md',
 };
 
 // True when running via the local Express server
@@ -27,7 +36,6 @@ const state = {
   editMode:    false,
   editContent: '',
   rawMarkdown: '',
-  fileShas:    {},   // key → GitHub blob SHA (needed for PUT)
 };
 
 
@@ -106,27 +114,20 @@ function setActiveNav(key) {
    saveFileData   → { success } | { error }
 ════════════════════════════════════════ */
 
+// Reads: plain relative fetch — no branch dependency, no API rate limits
 async function fetchFileData(key) {
   if (IS_LOCAL) {
     const res = await fetch(`/api/file/${key}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
-
-  const path = FILE_PATHS[key];
-  const res  = await fetch(
-    `https://api.github.com/repos/${GITHUB_REPO}/contents/${path}?ref=${GITHUB_BRANCH}`,
-    { headers: githubHeaders() }
-  );
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `GitHub API ${res.status}`);
-  }
-  const data = await res.json();
-  state.fileShas[key] = data.sha;
-  return { content: decodeBase64(data.content), modified: null };
+  const res = await fetch(RELATIVE_PATHS[key]);
+  if (!res.ok) throw new Error(`${RELATIVE_PATHS[key]} — HTTP ${res.status}`);
+  const content = await res.text();
+  return { content, modified: null };
 }
 
+// Writes: GitHub Contents API (fetches fresh SHA first to avoid conflicts)
 async function saveFileData(key, content) {
   if (IS_LOCAL) {
     const res  = await fetch(`/api/file/${key}`, {
@@ -141,28 +142,35 @@ async function saveFileData(key, content) {
   const tok = getToken();
   if (!tok) return { error: 'A GitHub token is required to save. Click "Token" in the sidebar.' };
 
-  const sha = state.fileShas[key];
-  if (!sha) return { error: 'File SHA missing — reload the document before saving.' };
-
-  const path = FILE_PATHS[key];
-  const res  = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${path}`, {
-    method:  'PUT',
-    headers: { 'Content-Type': 'application/json', ...githubHeaders() },
-    body:    JSON.stringify({
-      message: `Update ${path} via Jedi Dev Portal`,
-      content: encodeBase64(content),
-      sha,
-      branch: GITHUB_BRANCH,
-    }),
-  });
-
-  if (res.ok) {
-    const data = await res.json();
-    state.fileShas[key] = data.content.sha;
-    return { success: true };
+  // Always fetch a fresh SHA to avoid stale-SHA conflicts
+  const repoPath = FILE_PATHS[key];
+  const shaRes   = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}?ref=${GITHUB_BRANCH}`,
+    { headers: githubHeaders() }
+  );
+  if (!shaRes.ok) {
+    const e = await shaRes.json().catch(() => ({}));
+    return { error: e.message || `Could not fetch SHA (${shaRes.status})` };
   }
-  const err = await res.json().catch(() => ({}));
-  return { error: err.message || `GitHub API error ${res.status}` };
+  const { sha } = await shaRes.json();
+
+  const putRes = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}`,
+    {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json', ...githubHeaders() },
+      body:    JSON.stringify({
+        message: `Update ${repoPath} via Jedi Dev Portal`,
+        content: encodeBase64(content),
+        sha,
+        branch: GITHUB_BRANCH,
+      }),
+    }
+  );
+
+  if (putRes.ok) return { success: true };
+  const err = await putRes.json().catch(() => ({}));
+  return { error: err.message || `GitHub API error ${putRes.status}` };
 }
 
 function encodeBase64(str) {

@@ -15,6 +15,8 @@ const FILES = {
   SESSIONS: { path: path.join(ROOT, 'docs', 'SESSIONS.md'),     label: 'Session Log'     },
 };
 
+// README.md lives at the repo root, not inside docs/
+app.get('/README.md', (req, res) => res.sendFile(path.join(ROOT, 'README.md')));
 app.use(express.static(path.join(ROOT, 'docs')));
 app.use(express.json());
 
