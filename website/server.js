@@ -15,7 +15,7 @@ const FILES = {
   SESSIONS: { path: path.join(ROOT, 'docs', 'SESSIONS.md'),     label: 'Session Log'     },
 };
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(ROOT, 'docs')));
 app.use(express.json());
 
 app.get('/api/files', (req, res) => {
