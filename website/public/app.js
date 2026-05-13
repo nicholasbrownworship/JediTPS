@@ -1,12 +1,33 @@
 /* ════════════════════════════════════════
+   GITHUB CONFIG
+   Change GITHUB_BRANCH to whatever branch
+   GitHub Pages is serving from.
+════════════════════════════════════════ */
+
+const GITHUB_REPO   = 'nicholasbrownworship/JediTPS';
+const GITHUB_BRANCH = 'main';
+
+const FILE_PATHS = {
+  README:   'README.md',
+  DESIGN:   'docs/DESIGN.md',
+  SYSTEMS:  'docs/SYSTEMS.md',
+  SESSIONS: 'docs/SESSIONS.md',
+};
+
+// True when running via the local Express server
+const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
+
+
+/* ════════════════════════════════════════
    STATE
 ════════════════════════════════════════ */
 
 const state = {
-  activeKey:     null,
-  editMode:      false,
-  editContent:   '',
-  rawMarkdown:   '',   // current doc's raw source (for checkbox toggling)
+  activeKey:   null,
+  editMode:    false,
+  editContent: '',
+  rawMarkdown: '',
+  fileShas:    {},   // key → GitHub blob SHA (needed for PUT)
 };
 
 
@@ -18,11 +39,31 @@ marked.use({ gfm: true, breaks: false });
 
 
 /* ════════════════════════════════════════
+   GITHUB TOKEN (stored in localStorage)
+════════════════════════════════════════ */
+
+const TOKEN_KEY = 'jedi_gh_token';
+
+function getToken()    { return localStorage.getItem(TOKEN_KEY) || ''; }
+function setToken(tok) {
+  if (tok) localStorage.setItem(TOKEN_KEY, tok);
+  else     localStorage.removeItem(TOKEN_KEY);
+  updateTokenUI();
+}
+
+function githubHeaders() {
+  const tok = getToken();
+  return tok ? { Authorization: `Bearer ${tok}` } : {};
+}
+
+
+/* ════════════════════════════════════════
    INIT
 ════════════════════════════════════════ */
 
 async function init() {
   await buildNav();
+  initTokenUI();
   await loadProgressFromSystems();
   openFile('DESIGN');
 }
@@ -40,23 +81,14 @@ const NAV_META = {
 };
 
 async function buildNav() {
-  const res = await fetch('/api/files');
-  const files = await res.json();
   const container = document.getElementById('navItems');
-
-  const order = ['README', 'DESIGN', 'SYSTEMS', 'SESSIONS'];
-  order.forEach(key => {
-    const file = files.find(f => f.key === key);
-    if (!file) return;
-    const meta = NAV_META[key] || { label: file.label, icon: '○' };
-
+  ['README', 'DESIGN', 'SYSTEMS', 'SESSIONS'].forEach(key => {
+    const meta = NAV_META[key];
     const item = document.createElement('div');
     item.className = 'nav-item';
     item.dataset.key = key;
     item.innerHTML = `<em class="nav-icon">${meta.icon}</em> ${meta.label}`;
-    item.addEventListener('click', () => {
-      if (!state.editMode) openFile(key);
-    });
+    item.addEventListener('click', () => { if (!state.editMode) openFile(key); });
     container.appendChild(item);
   });
 }
@@ -69,6 +101,80 @@ function setActiveNav(key) {
 
 
 /* ════════════════════════════════════════
+   API ABSTRACTION
+   fetchFileData  → { content, modified? }
+   saveFileData   → { success } | { error }
+════════════════════════════════════════ */
+
+async function fetchFileData(key) {
+  if (IS_LOCAL) {
+    const res = await fetch(`/api/file/${key}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  const path = FILE_PATHS[key];
+  const res  = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/contents/${path}?ref=${GITHUB_BRANCH}`,
+    { headers: githubHeaders() }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API ${res.status}`);
+  }
+  const data = await res.json();
+  state.fileShas[key] = data.sha;
+  return { content: decodeBase64(data.content), modified: null };
+}
+
+async function saveFileData(key, content) {
+  if (IS_LOCAL) {
+    const res  = await fetch(`/api/file/${key}`, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ content }),
+    });
+    const data = await res.json();
+    return res.ok ? { success: true } : { error: data.error };
+  }
+
+  const tok = getToken();
+  if (!tok) return { error: 'A GitHub token is required to save. Click "Token" in the sidebar.' };
+
+  const sha = state.fileShas[key];
+  if (!sha) return { error: 'File SHA missing — reload the document before saving.' };
+
+  const path = FILE_PATHS[key];
+  const res  = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${path}`, {
+    method:  'PUT',
+    headers: { 'Content-Type': 'application/json', ...githubHeaders() },
+    body:    JSON.stringify({
+      message: `Update ${path} via Jedi Dev Portal`,
+      content: encodeBase64(content),
+      sha,
+      branch: GITHUB_BRANCH,
+    }),
+  });
+
+  if (res.ok) {
+    const data = await res.json();
+    state.fileShas[key] = data.content.sha;
+    return { success: true };
+  }
+  const err = await res.json().catch(() => ({}));
+  return { error: err.message || `GitHub API error ${res.status}` };
+}
+
+function encodeBase64(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+function decodeBase64(b64) {
+  return decodeURIComponent(escape(atob(b64.replace(/\n/g, ''))));
+}
+
+
+/* ════════════════════════════════════════
    LOAD FILE
 ════════════════════════════════════════ */
 
@@ -77,7 +183,6 @@ async function openFile(key) {
   state.activeKey = key;
   state.editMode  = false;
 
-  // Loading state
   const content = document.getElementById('content');
   content.className = 'content';
   content.innerHTML = '<div class="loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
@@ -86,15 +191,12 @@ async function openFile(key) {
   document.getElementById('topbarActions').innerHTML = '';
 
   try {
-    const res  = await fetch(`/api/file/${key}`);
-    const data = await res.json();
-
+    const data = await fetchFileData(key);
     state.rawMarkdown = data.content;
     renderView(key, data.content, data.modified);
-
     if (key === 'SYSTEMS') updateProgress(data.content);
-  } catch {
-    content.innerHTML = '<div class="loading">Failed to load document.</div>';
+  } catch (err) {
+    content.innerHTML = `<div class="loading">Failed to load — ${err.message}</div>`;
   }
 }
 
@@ -108,27 +210,36 @@ function renderView(key, markdown, modified) {
   content.innerHTML = '';
   content.appendChild(div);
 
-  // Make checkboxes interactive
   attachCheckboxHandlers(div, key);
 
-  // Topbar
-  const meta = NAV_META[key]?.label || key;
-  document.getElementById('docTitle').textContent = meta;
-  document.getElementById('docMeta').textContent  = modified
-    ? `Updated ${fmt(new Date(modified))}`
-    : '';
+  document.getElementById('docTitle').textContent = NAV_META[key]?.label || key;
+  document.getElementById('docMeta').textContent  = modified ? `Updated ${fmt(new Date(modified))}` : '';
 
-  // Actions
   const actions = document.getElementById('topbarActions');
   actions.innerHTML = '';
 
-  const dl = make('button', { class: 'btn btn-ghost' }, '↓ &nbsp;Download');
-  dl.addEventListener('click', () => { window.location.href = `/download/${key}`; });
+  const dl   = make('button', { class: 'btn btn-ghost'    }, '↓ &nbsp;Download');
+  const edit = make('button', { class: 'btn btn-primary'  }, '✎ &nbsp;Edit');
 
-  const edit = make('button', { class: 'btn btn-primary' }, '✎ &nbsp;Edit');
+  dl.addEventListener(  'click', () => downloadFile(key));
   edit.addEventListener('click', () => enterEditMode(key, markdown));
 
   actions.append(dl, edit);
+}
+
+function downloadFile(key) {
+  if (IS_LOCAL) {
+    window.location.href = `/download/${key}`;
+    return;
+  }
+  // On GitHub Pages, build a raw URL and trigger download via anchor
+  const path = FILE_PATHS[key];
+  const url  = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${path}`;
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = path.split('/').pop();
+  a.target   = '_blank';
+  a.click();
 }
 
 
@@ -137,7 +248,6 @@ function renderView(key, markdown, modified) {
 ════════════════════════════════════════ */
 
 function parseMarkdown(src) {
-  // Render, then un-disable checkboxes so we can attach real handlers
   return marked.parse(src).replace(
     /<input type="checkbox" disabled/g,
     '<input type="checkbox" class="task-check"'
@@ -147,24 +257,22 @@ function parseMarkdown(src) {
 
 /* ════════════════════════════════════════
    INTERACTIVE CHECKBOXES
-   Clicking a checkbox instantly saves.
 ════════════════════════════════════════ */
 
 function attachCheckboxHandlers(container, key) {
-  const boxes = container.querySelectorAll('input.task-check');
-  boxes.forEach((cb, idx) => {
+  container.querySelectorAll('input.task-check').forEach((cb, idx) => {
     cb.addEventListener('change', async (e) => {
-      const checked  = e.target.checked;
-      const updated  = toggleNthCheckbox(state.rawMarkdown, idx, checked);
+      const checked = e.target.checked;
+      const updated = toggleNthCheckbox(state.rawMarkdown, idx, checked);
       if (updated === null) { e.target.checked = !checked; return; }
 
-      const saved = await saveContent(key, updated);
-      if (saved) {
+      const result = await saveContent(key, updated);
+      if (result) {
         state.rawMarkdown = updated;
         if (key === 'SYSTEMS') updateProgress(updated);
         showToast('Progress saved', 'ok');
       } else {
-        e.target.checked = !checked; // revert
+        e.target.checked = !checked;
       }
     });
   });
@@ -190,7 +298,6 @@ function enterEditMode(key, markdown) {
   state.editMode    = true;
   state.editContent = markdown;
 
-  // Split-pane layout
   const content = document.getElementById('content');
   content.className = 'content edit-mode';
   content.innerHTML = `
@@ -214,7 +321,6 @@ function enterEditMode(key, markdown) {
     refreshPreview(ta.value);
   });
 
-  // Tab → spaces
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -224,9 +330,8 @@ function enterEditMode(key, markdown) {
     }
   });
 
-  // Topbar edit controls
   document.getElementById('docTitle').textContent = `Editing — ${NAV_META[key]?.label || key}`;
-  document.getElementById('docMeta').textContent  = 'Ctrl+S to save';
+  document.getElementById('docMeta').textContent  = 'Ctrl+S to save · Esc to cancel';
 
   const actions = document.getElementById('topbarActions');
   actions.innerHTML = '';
@@ -268,73 +373,95 @@ function exitEditMode() {
 
 
 /* ════════════════════════════════════════
-   SAVE (shared by edit mode + checkboxes)
+   SAVE
 ════════════════════════════════════════ */
 
 async function saveContent(key, content) {
-  try {
-    const res  = await fetch(`/api/file/${key}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-    });
-    const data = await res.json();
-    if (res.ok) return true;
-    showToast(data.error || 'Save failed', 'err');
-    return false;
-  } catch {
-    showToast('Network error — could not save', 'err');
+  const result = await saveFileData(key, content);
+  if (!result.success) {
+    showToast(result.error || 'Save failed', 'err');
     return false;
   }
+  return true;
 }
 
 
 /* ════════════════════════════════════════
-   PASSWORD MODAL (for checkbox saves)
+   TOKEN UI  (sidebar, GitHub Pages only)
 ════════════════════════════════════════ */
 
-function promptPassword(title, sub) {
-  return new Promise((resolve) => {
-    const overlay  = document.getElementById('pwdModalOverlay');
-    const titleEl  = document.getElementById('pwdModalTitle');
-    const subEl    = document.getElementById('pwdModalSub');
-    const input    = document.getElementById('pwdModalInput');
-    const confirm  = document.getElementById('pwdModalConfirm');
-    const cancel   = document.getElementById('pwdModalCancel');
+function initTokenUI() {
+  const wrap = document.getElementById('sidebarToken');
+  if (IS_LOCAL) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  updateTokenUI();
 
-    titleEl.textContent = title;
-    subEl.textContent   = sub;
-    input.value         = '';
-    overlay.hidden      = false;
+  document.getElementById('tokenBtn').addEventListener('click', async () => {
+    const current = getToken();
+    const modal   = document.getElementById('pwdModalOverlay');
+    const titleEl = document.getElementById('pwdModalTitle');
+    const subEl   = document.getElementById('pwdModalSub');
+    const input   = document.getElementById('pwdModalInput');
+
+    titleEl.textContent = 'GitHub Personal Access Token';
+    subEl.textContent   = 'Required to save changes. Stored in your browser only.';
+    input.value         = current;
+    input.placeholder   = 'ghp_…';
+    input.type          = 'text';
+    modal.hidden        = false;
     setTimeout(() => input.focus(), 60);
 
+    const tok = await waitForModal();
+    input.type = 'password';
+    if (tok !== null) {
+      setToken(tok.trim());
+      showToast(tok.trim() ? 'Token saved' : 'Token cleared', 'ok');
+    }
+  });
+}
+
+function updateTokenUI() {
+  const btn   = document.getElementById('tokenBtn');
+  if (!btn) return;
+  const hasTok = !!getToken();
+  const icon   = btn.querySelector('.token-dot');
+  const label  = btn.querySelector('.token-label');
+  if (icon)  icon.className  = `token-dot ${hasTok ? 'set' : ''}`;
+  if (label) label.textContent = hasTok ? 'Token set' : 'Set token';
+}
+
+
+/* ════════════════════════════════════════
+   PASSWORD / TOKEN MODAL
+════════════════════════════════════════ */
+
+let _modalResolve = null;
+
+function waitForModal() {
+  return new Promise((resolve) => {
+    _modalResolve = resolve;
+    const confirm = document.getElementById('pwdModalConfirm');
+    const cancel  = document.getElementById('pwdModalCancel');
+    const input   = document.getElementById('pwdModalInput');
+
     function done(val) {
-      overlay.hidden = true;
+      document.getElementById('pwdModalOverlay').hidden = true;
       confirm.removeEventListener('click', onConfirm);
       cancel.removeEventListener( 'click', onCancel);
       input.removeEventListener(  'keydown', onKey);
+      _modalResolve = null;
       resolve(val);
     }
 
-    function onConfirm() {
-      const v = input.value.trim();
-      if (!v) {
-        input.classList.add('shake');
-        setTimeout(() => input.classList.remove('shake'), 400);
-        return;
-      }
-      done(v);
-    }
-
-    function onCancel() { done(null); }
-
+    function onConfirm() { done(input.value); }
+    function onCancel()  { done(null); }
     function onKey(e) {
       if (e.key === 'Enter')  onConfirm();
       if (e.key === 'Escape') onCancel();
     }
 
-    confirm.addEventListener('click', onConfirm);
-    cancel.addEventListener( 'click', onCancel);
+    confirm.addEventListener('click',   onConfirm);
+    cancel.addEventListener( 'click',   onCancel);
     input.addEventListener(  'keydown', onKey);
   });
 }
@@ -356,7 +483,6 @@ function updateProgress(src) {
     const block = (src.match(re) || [''])[0];
     const total = (block.match(/- \[[ xX]\]/g) || []).length;
     const done  = (block.match(/- \[[xX]\]/g)  || []).length;
-
     const countEl = document.getElementById(`count-${id}`);
     const fillEl  = document.getElementById(`fill-${id}`);
     if (countEl) countEl.textContent = `${done}/${total}`;
@@ -366,8 +492,7 @@ function updateProgress(src) {
 
 async function loadProgressFromSystems() {
   try {
-    const res  = await fetch('/api/file/SYSTEMS');
-    const data = await res.json();
+    const data = await fetchFileData('SYSTEMS');
     updateProgress(data.content);
   } catch {}
 }
@@ -378,12 +503,11 @@ async function loadProgressFromSystems() {
 ════════════════════════════════════════ */
 
 document.addEventListener('keydown', (e) => {
-  if (state.editMode) {
-    if (e.key === 'Escape') exitEditMode();
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-      e.preventDefault();
-      if (state.activeKey) commitEdit(state.activeKey);
-    }
+  if (!state.editMode) return;
+  if (e.key === 'Escape') exitEditMode();
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    if (state.activeKey) commitEdit(state.activeKey);
   }
 });
 
@@ -406,7 +530,7 @@ function make(tag, attrs = {}, html = '') {
 function showToast(msg, type = 'ok') {
   document.querySelector('.toast')?.remove();
   const t = document.createElement('div');
-  t.className = `toast ${type}`;
+  t.className   = `toast ${type}`;
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 3100);
