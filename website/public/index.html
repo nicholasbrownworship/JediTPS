@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JEDI — First Measure Studios</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="layout">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <div class="logo-saber"></div>
+          <div class="logo-text">
+            <div class="logo-title">JEDI</div>
+            <div class="logo-studio">First Measure Studios</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-nav">
+        <div class="nav-section-label">Documents</div>
+        <div id="navItems"></div>
+      </div>
+
+      <div class="sidebar-progress">
+        <div class="progress-label">Systems Progress</div>
+
+        <div class="tier-row">
+          <div class="tier-row-header">
+            <span class="tier-name">Tier 1 — Core</span>
+            <span class="tier-count" id="count-t1">—</span>
+          </div>
+          <div class="tier-bar"><div class="tier-fill t1" id="fill-t1" style="width:0%"></div></div>
+        </div>
+
+        <div class="tier-row">
+          <div class="tier-row-header">
+            <span class="tier-name">Tier 2 — Secondary</span>
+            <span class="tier-count" id="count-t2">—</span>
+          </div>
+          <div class="tier-bar"><div class="tier-fill t2" id="fill-t2" style="width:0%"></div></div>
+        </div>
+
+        <div class="tier-row">
+          <div class="tier-row-header">
+            <span class="tier-name">Tier 3 — Polish</span>
+            <span class="tier-count" id="count-t3">—</span>
+          </div>
+          <div class="tier-bar"><div class="tier-fill t3" id="fill-t3" style="width:0%"></div></div>
+        </div>
+
+        <div class="tier-row">
+          <div class="tier-row-header">
+            <span class="tier-name">Tier 4 — Stretch</span>
+            <span class="tier-count" id="count-t4">—</span>
+          </div>
+          <div class="tier-bar"><div class="tier-fill t4" id="fill-t4" style="width:0%"></div></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── MAIN ── -->
+    <div class="main">
+      <div class="topbar">
+        <div class="topbar-left">
+          <span class="doc-title" id="docTitle">Development Portal</span>
+          <span class="doc-meta" id="docMeta"></span>
+        </div>
+        <div class="topbar-actions" id="topbarActions"></div>
+      </div>
+
+      <div class="content" id="content">
+        <div class="welcome">
+          <div class="welcome-saber"></div>
+          <div class="welcome-title">Select a Document</div>
+          <div class="welcome-sub">Design docs · Systems map · Session log</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── PASSWORD MODAL ── -->
+  <div class="pwd-modal-overlay" id="pwdModalOverlay" hidden>
+    <div class="pwd-modal">
+      <div class="pwd-modal-title" id="pwdModalTitle">Enter Password</div>
+      <div class="pwd-modal-sub" id="pwdModalSub">Required to save changes</div>
+      <input type="password" class="pwd-modal-input" id="pwdModalInput" placeholder="Password" autocomplete="current-password">
+      <div class="pwd-modal-actions">
+        <button class="btn btn-ghost" id="pwdModalCancel">Cancel</button>
+        <button class="btn btn-primary" id="pwdModalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

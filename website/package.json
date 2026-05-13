@@ -1,0 +1,13 @@
+{
+  "name": "jedi-dev-portal",
+  "version": "1.0.0",
+  "description": "Development portal for the Jedi UE5 game project",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

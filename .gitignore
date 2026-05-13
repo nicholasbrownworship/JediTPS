@@ -31,6 +31,10 @@ Saved/
 Thumbs.db
 desktop.ini
 
+# Node
+node_modules/
+npm-debug.log*
+
 # IDE
 .idea/
 .vscode/
